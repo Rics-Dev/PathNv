@@ -1,7 +1,10 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:pathnv/model/path.dart';
+import 'package:process_run/process_run.dart';
 import 'package:process_run/stdio.dart';
 import 'package:yaru/yaru.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -13,57 +16,99 @@ class Home extends StatefulWidget {
   State<Home> createState() => HomeState();
 }
 
-class HomeState extends State<Home> {
-  List<Paths> paths = [];
-  List<Paths> filteredPaths = [];
+class HomeState extends State<Home> with TickerProviderStateMixin {
+  static const int tabCount = 2;
+  static const String envTabLabel = "Environment Variables";
+  static const String shellTabLabel = "Shell Variables";
+
+  List<Paths> shellPaths = [];
+  List<Paths> envPaths = [];
+  List<Paths> filteredShellPaths = [];
+  List<Paths> filteredEnvPaths = [];
   bool isRefreshing = false;
   bool isSearching = false;
   String searchQuery = '';
-  String shell = Platform.environment['SHELL'] ?? 'sh';
-  String? newAddedPath = '';
-  TextEditingController pathController = TextEditingController();
 
-  void runShellCommand() async {
-    String command = 'echo \$PATH';
+  final TextEditingController _pathController = TextEditingController();
+  late final TabController _tabController;
+  late final String _shell;
 
-    ProcessResult result =
-        await Process.run(shell, ['-l', '-i', '-c', command]);
-
-    String pathResult = result.stdout.trim();
-
-    setState(() {
-      paths = pathResult.split(':').map((path) => Paths(path)).toList();
-      filteredPaths = List.from(paths);
-      isRefreshing = false;
-    });
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: tabCount, vsync: this)
+      ..addListener(_handleTabChange);
+    _shell = Platform.environment['SHELL'] ?? 'sh';
+    runShellCommand();
   }
 
-  String _getShellConfigFile(String home) {
-    final configFiles = {
-      'bash': '$home/.bashrc',
-      'zsh': '$home/.zshrc',
-      'fish': '$home/.config/fish/config.fish',
-      'csh': '$home/.cshrc',
-      'tcsh': '$home/.cshrc',
-      'ksh': '$home/.kshrc',
-    };
+  @override
+  void dispose() {
+    _pathController.dispose();
+    _tabController.dispose();
+    super.dispose();
+  }
 
-    return configFiles.entries
-        .firstWhere((entry) => shell.contains(entry.key),
-            orElse: () => MapEntry('bash', '$home/.bashrc'))
-        .value;
+  void runShellCommand() async {
+    final result = await Process.run(_shell, ['-l', '-i', '-c', 'echo \$PATH']);
+
+    final envPathsResult = Platform.environment['PATH'];
+
+    if (envPathsResult != null) {
+      final shellPathsResult = result.stdout
+          .trim()
+          .split(':')
+          .where((path) => !envPathsResult.contains(path))
+          .toList();
+
+          
+      setState(() {
+        envPaths.clear();
+        envPaths.addAll(envPathsResult.split(':').map((path) => Paths(path)));
+
+        shellPaths.clear();
+        shellPaths.addAll(shellPathsResult.map((path) => Paths(path)).cast<Paths>());
+
+        filteredShellPaths.clear();
+        filteredShellPaths.addAll(shellPaths);
+
+        filteredEnvPaths.clear();
+        filteredEnvPaths.addAll(envPaths);
+        isRefreshing = false;
+      });
+    }
+  }
+
+  Map<String, List<String>> getShellConfigFiles(String home) {
+    return {
+      'bash': ['$home/.bashrc', '$home/.bash_profile', '$home/.profile'],
+      'zsh': ['$home/.zshrc', '$home/.zprofile', '$home/.profile'],
+      'fish': ['$home/.config/fish/config.fish', '$home/.profile'],
+      'csh': ['$home/.cshrc', '$home/.profile'],
+      'tcsh': ['$home/.tcshrc', '$home/.profile'],
+      'ksh': ['$home/.kshrc', '$home/.profile'],
+    };
   }
 
   void filterPaths(String query) {
     setState(() {
       searchQuery = query;
+
       if (query.isEmpty) {
-        filteredPaths = List.from(paths);
+        filteredShellPaths = List.from(shellPaths);
+        filteredEnvPaths = List.from(envPaths);
       } else {
-        filteredPaths = paths
-            .where(
-                (path) => path.path.toLowerCase().contains(query.toLowerCase()))
-            .toList();
+        if (_tabController.index == 1) {
+          filteredEnvPaths = envPaths
+              .where((path) =>
+                  path.path.toLowerCase().contains(query.toLowerCase()))
+              .toList();
+        } else {
+          filteredShellPaths = shellPaths
+              .where((path) =>
+                  path.path.toLowerCase().contains(query.toLowerCase()))
+              .toList();
+        }
       }
     });
   }
@@ -74,7 +119,15 @@ class HomeState extends State<Home> {
       throw Exception('HOME environment variable not set');
     }
 
-    final shellConfigFile = _getShellConfigFile(home);
+    final configFiles = getShellConfigFiles(home);
+    final shellType = _shell.split('/').last;
+    var shellConfigFile = '';
+
+    if (shellType == 'bash' || shellType == 'zsh') {
+      shellConfigFile = configFiles[shellType]![1];
+    } else {
+      shellConfigFile = configFiles[shellType]![0];
+    }
 
     final file = File(shellConfigFile);
     await file.writeAsString('\nexport PATH="\$PATH:$newPath"\n',
@@ -89,29 +142,39 @@ class HomeState extends State<Home> {
       throw Exception('HOME environment variable not set');
     }
 
-    final shellConfigFile = _getShellConfigFile(home);
+    final configFiles = getShellConfigFiles(home);
+    final shellType = _shell.split('/').last;
 
-    final file = File(shellConfigFile);
-    if (!await file.exists()) {
-      if (kDebugMode) {
-        print('Config file not found: $shellConfigFile');
+    List<String> possibleConfigFiles =
+        configFiles[shellType] ?? configFiles['bash']!;
+
+    for (final configFile in possibleConfigFiles) {
+      final file = File(configFile);
+      if (await file.exists()) {
+        final lines = await file.readAsLines();
+        bool pathFound = false;
+
+        final updatedLines = lines.where((line) {
+          if (line.trim().startsWith('export PATH=')) {
+            final paths = line.split(':');
+            if (paths.any((path) => path.contains(pathToDelete))) {
+              pathFound = true;
+              return false;
+            }
+          }
+          return true;
+        }).toList();
+
+        if (pathFound) {
+          await file.writeAsString(updatedLines.join('\n'));
+          if (kDebugMode) {
+            print('Updated PATH in $configFile');
+          }
+          runShellCommand();
+          return;
+        }
       }
-      return;
     }
-
-    final lines = await file.readAsLines();
-
-    final updatedLines = lines.where((line) {
-      if (line.trim().startsWith('export PATH=')) {
-        final paths = line.split(':');
-        return !paths.any((path) => path.contains(pathToDelete));
-      }
-      return true;
-    }).toList();
-
-    await file.writeAsString(updatedLines.join('\n'));
-
-    runShellCommand();
   }
 
   Future<void> editPath(String oldPath, String newPath) async {
@@ -120,54 +183,60 @@ class HomeState extends State<Home> {
       throw Exception('HOME environment variable not set');
     }
 
-    final shellConfigFile = _getShellConfigFile(home);
+    final configFiles = getShellConfigFiles(home);
+    final shellType = _shell.split('/').last;
 
-    final file = File(shellConfigFile);
-    if (!await file.exists()) {
-      if (kDebugMode) {
-        print('Config file not found: $shellConfigFile');
+    List<String> possibleConfigFiles =
+        configFiles[shellType] ?? configFiles['bash']!;
+
+    for (final configFile in possibleConfigFiles) {
+      final file = File(configFile);
+      if (await file.exists()) {
+        final lines = await file.readAsLines();
+        bool pathFound = false;
+
+        final updatedLines = lines.map((line) {
+          if (line.trim().startsWith('export PATH=')) {
+            if (line.contains(oldPath)) {
+              pathFound = true;
+              return line.replaceAll(oldPath, newPath);
+            }
+          }
+          return line;
+        }).toList();
+
+        if (pathFound) {
+          await file.writeAsString(updatedLines.join('\n'));
+          if (kDebugMode) {
+            print('Updated PATH in $configFile');
+          }
+          runShellCommand();
+          return;
+        }
       }
-      return;
     }
-
-    final lines = await file.readAsLines();
-
-    final updatedLines = lines.map((line) {
-      if (line.trim().startsWith('export PATH=')) {
-        return line.replaceAll(oldPath, newPath);
-      }
-      return line;
-    }).toList();
-
-    await file.writeAsString(updatedLines.join('\n'));
-
-    runShellCommand();
   }
 
-  @override
-  void initState() {
-    super.initState();
-    runShellCommand();
-  }
-
-  @override
-  void dispose() {
-    pathController.dispose();
-    super.dispose();
+  void _handleTabChange() {
+    if (_tabController.indexIsChanging) {
+      setState(() {});
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: YaruWindowTitleBar(
-        leading: Center(
-          child: YaruOptionButton(
-            child: const Icon(LucideIcons.plus),
-            onPressed: () {
-              addPathDialog(context);
-            },
-          ),
-        ),
+        leading: _tabController.index == 1
+            ? null
+            : Center(
+                child: YaruOptionButton(
+                  child: const Icon(LucideIcons.plus),
+                  onPressed: () {
+                    addPathDialog(context);
+                  },
+                ),
+              ),
         actions: [
           YaruSearchButton(
             icon: isSearching
@@ -177,7 +246,7 @@ class HomeState extends State<Home> {
               setState(() {
                 isSearching = !isSearching;
                 searchQuery = '';
-                filteredPaths = List.from(paths);
+                filteredShellPaths = List.from(shellPaths);
               });
             },
           ),
@@ -229,108 +298,173 @@ class HomeState extends State<Home> {
               )
             : const Text("PathNv"),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(kYaruPagePadding),
+      body: Column(
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(LucideIcons.terminal),
-                      const SizedBox(width: 8),
-                      SelectableText(
-                        shell.split('/').last,
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                  Text("(${filteredPaths.length})")
-                ],
+          YaruTabBar(
+            tabController: _tabController,
+            tabs: const [
+              YaruTab(
+                label: shellTabLabel,
+                icon: Icon(LucideIcons.terminal),
               ),
-              for (Paths path in filteredPaths) ...[
-                YaruTile(
-                  style: YaruTileStyle.normal,
-                  leading: path.isEditing
-                      ? YaruIconButton(
-                          icon: const Icon(LucideIcons.folder),
-                          onPressed: () async {
-                            String? selectedDirectory =
-                                await FilePicker.platform.getDirectoryPath();
-                            if (selectedDirectory != null) {
-                              setState(() {
-                                pathController.text = selectedDirectory;
-                              });
-                            }
-                          },
-                        )
-                      : null,
-                  trailing: Row(
-                    children: [
-                      if (path.isEditing) ...[
-                        YaruIconButton(
-                          icon: const Icon(LucideIcons.check),
-                          onPressed: () {
-                            editPathDialog(context, path, pathController.text);
-                          },
-                        ),
-                        YaruIconButton(
-                          icon: const Icon(
-                            LucideIcons.x,
-                            color: Colors.red,
-                          ),
-                          onPressed: () {
-                            setState(() {
-                              path.isEditing = false;
-                            });
-                          },
-                        ),
-                      ] else ...[
-                        YaruIconButton(
-                          icon: const Icon(LucideIcons.pencil),
-                          onPressed: () {
-                            setState(() {
-                              path.isEditing = true;
-                              pathController.text = path.path;
-                            });
-                          },
-                        ),
-                        YaruIconButton(
-                          icon: const Icon(
-                            LucideIcons.trash,
-                            color: Colors.red,
-                          ),
-                          onPressed: () {
-                            deletePathDialog(context, path);
-                          },
-                        ),
-                      ],
-                    ],
-                  ),
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 16, horizontal: 26),
-                  title: path.isEditing
-                      ? YaruSearchField(
-                          controller: pathController,
-                          onChanged: (value) {
-                            setState(() {
-                              // path.newPath = value;
-                              pathController.text = value;
-                            });
-                          },
-                        )
-                      : SelectableText(path.path),
-                ),
-                const Divider(),
-              ],
+              YaruTab(
+                label: envTabLabel,
+                icon: Icon(LucideIcons.settings),
+              ),
             ],
-          )
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                ListView(
+                  padding: const EdgeInsets.all(kYaruPagePadding),
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(LucideIcons.terminal),
+                                const SizedBox(width: 8),
+                                SelectableText(
+                                  _shell.split('/').last,
+                                  style: const TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Text("(${filteredShellPaths.length})")
+                          ],
+                        ),
+                        for (Paths path in filteredShellPaths) ...[
+                          YaruTile(
+                            style: YaruTileStyle.normal,
+                            leading: path.isEditing
+                                ? YaruIconButton(
+                                    icon: const Icon(LucideIcons.folder),
+                                    onPressed: () async {
+                                      String? selectedDirectory =
+                                          await FilePicker.platform
+                                              .getDirectoryPath();
+                                      if (selectedDirectory != null) {
+                                        setState(() {
+                                          _pathController.text =
+                                              selectedDirectory;
+                                        });
+                                      }
+                                    },
+                                  )
+                                : null,
+                            trailing: Row(
+                              children: [
+                                if (path.isEditing) ...[
+                                  YaruIconButton(
+                                    icon: const Icon(LucideIcons.check),
+                                    onPressed: () {
+                                      editPathDialog(
+                                          context, path, _pathController.text);
+                                    },
+                                  ),
+                                  YaruIconButton(
+                                    icon: const Icon(
+                                      LucideIcons.x,
+                                      color: Colors.red,
+                                    ),
+                                    onPressed: () {
+                                      setState(() {
+                                        path.isEditing = false;
+                                      });
+                                    },
+                                  ),
+                                ] else ...[
+                                  YaruIconButton(
+                                    icon: const Icon(LucideIcons.pencil),
+                                    onPressed: () {
+                                      setState(() {
+                                        path.isEditing = true;
+                                        _pathController.text = path.path;
+                                      });
+                                    },
+                                  ),
+                                  YaruIconButton(
+                                    icon: const Icon(
+                                      LucideIcons.trash,
+                                      color: Colors.red,
+                                    ),
+                                    onPressed: () {
+                                      deletePathDialog(context, path);
+                                    },
+                                  ),
+                                ],
+                              ],
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 16, horizontal: 26),
+                            title: path.isEditing
+                                ? YaruSearchField(
+                                    controller: _pathController,
+                                    onChanged: (value) {
+                                      setState(() {
+                                        // path.newPath = value;
+                                        _pathController.text = value;
+                                      });
+                                    },
+                                  )
+                                : SelectableText(path.path),
+                          ),
+                          const Divider(),
+                        ],
+                      ],
+                    )
+                  ],
+                ),
+                ListView(
+                  padding: const EdgeInsets.all(kYaruPagePadding),
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Row(
+                              children: [
+                                Icon(LucideIcons.settings),
+                                SizedBox(width: 8),
+                                SelectableText(
+                                  "Env",
+                                  style: TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Text("(${filteredEnvPaths.length})")
+                          ],
+                        ),
+                        for (Paths path in filteredEnvPaths) ...[
+                          YaruTile(
+                            style: YaruTileStyle.normal,
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 20, horizontal: 26),
+                            title: SelectableText(path.path),
+                          ),
+                          const Divider(),
+                        ],
+                      ],
+                    )
+                  ],
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
