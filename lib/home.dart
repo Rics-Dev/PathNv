@@ -45,37 +45,42 @@ class HomeState extends State<Home> with TickerProviderStateMixin {
   @override
   void dispose() {
     _pathController.dispose();
-    _tabController.dispose();
     super.dispose();
   }
 
   void runShellCommand() async {
-    final result = await Process.run(_shell, ['-l', '-i', '-c', 'echo \$PATH']);
+    try {
+      final result =
+          await Process.run(_shell, ['-l', '-i', '-c', 'echo \$PATH']);
+      final envPathsResult = Platform.environment['PATH'];
 
-    final envPathsResult = Platform.environment['PATH'];
+      if (envPathsResult != null) {
+        final shellPathsResult = result.stdout
+            .trim()
+            .split(':')
+            .where((path) => !envPathsResult.contains(path))
+            .toList();
 
-    if (envPathsResult != null) {
-      final shellPathsResult = result.stdout
-          .trim()
-          .split(':')
-          .where((path) => !envPathsResult.contains(path))
-          .toList();
+        setState(() {
+          envPaths.clear();
+          envPaths.addAll(envPathsResult.split(':').map((path) => Paths(path)));
 
-          
-      setState(() {
-        envPaths.clear();
-        envPaths.addAll(envPathsResult.split(':').map((path) => Paths(path)));
+          shellPaths.clear();
+          shellPaths.addAll(
+              shellPathsResult.map((path) => Paths(path)).cast<Paths>());
 
-        shellPaths.clear();
-        shellPaths.addAll(shellPathsResult.map((path) => Paths(path)).cast<Paths>());
+          filteredShellPaths.clear();
+          filteredShellPaths.addAll(shellPaths);
 
-        filteredShellPaths.clear();
-        filteredShellPaths.addAll(shellPaths);
+          filteredEnvPaths.clear();
+          filteredEnvPaths.addAll(envPaths);
 
-        filteredEnvPaths.clear();
-        filteredEnvPaths.addAll(envPaths);
-        isRefreshing = false;
-      });
+          isRefreshing = false;
+        });
+      }
+    } catch (e) {
+      print('Error running shell command: $e');
+      setState(() => isRefreshing = false);
     }
   }
 
@@ -268,23 +273,8 @@ class HomeState extends State<Home> with TickerProviderStateMixin {
             childPadding: EdgeInsets.zero,
             icon: const Icon(LucideIcons.menu),
             itemBuilder: (context) => [
-              const PopupMenuItem(
-                child: Text("Preferences"),
-              ),
-              const PopupMenuItem(
-                child: Text("Keyboard Shortcuts"),
-              ),
               PopupMenuItem(
-                onTap: () => showDialog(
-                  context: context,
-                  builder: (context) => const AlertDialog(
-                    titlePadding: EdgeInsets.zero,
-                    title: YaruDialogTitleBar(
-                      isClosable: true,
-                    ),
-                    content: Text("Heeey"),
-                  ),
-                ),
+                onTap: () => aboutApp(context),
                 child: const Text("About PathNv"),
               ),
             ],
@@ -609,6 +599,63 @@ class HomeState extends State<Home> with TickerProviderStateMixin {
           ],
         );
       },
+    );
+  }
+
+  Future<dynamic> aboutApp(BuildContext context) {
+    return showDialog(
+      context: context,
+      builder: (context) => const AlertDialog(
+        titlePadding: EdgeInsets.zero,
+        title: YaruDialogTitleBar(
+          isClosable: true,
+        ),
+        content: Center(
+          child: Column(
+            children: [
+              Image(
+                image: AssetImage('assets/app_icon.png'),
+                width: 150.0,
+                height: 150.0,
+              ),
+              const SizedBox(
+                height: 5,
+              ),
+              Text(
+                "PathNv",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24),
+              ),
+              const SizedBox(
+                height: 5,
+              ),
+              Text(
+                "Ric's Dev",
+                style: TextStyle(fontWeight: FontWeight.w300),
+              ),
+              const SizedBox(
+                height: 5,
+              ),
+              YaruBorderContainer(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                color: Color.fromARGB(187, 97, 184, 255),
+                borderRadius: BorderRadius.all(Radius.circular(100)),
+                child: Text('1.0.0'),
+              ),
+              const SizedBox(
+                height: 24,
+              ),
+              YaruTile(
+                title: Text("Credits"),
+                trailing: Icon(LucideIcons.chevronRight),
+              ),
+              YaruTile(
+                title: Text("Legal"),
+                trailing: Icon(LucideIcons.chevronRight),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
