@@ -4,7 +4,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:pathnv/model/path.dart';
-import 'package:process_run/process_run.dart';
 import 'package:process_run/stdio.dart';
 import 'package:yaru/yaru.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -79,7 +78,6 @@ class HomeState extends State<Home> with TickerProviderStateMixin {
         });
       }
     } catch (e) {
-      print('Error running shell command: $e');
       setState(() => isRefreshing = false);
     }
   }
@@ -618,21 +616,21 @@ class HomeState extends State<Home> with TickerProviderStateMixin {
                 width: 150.0,
                 height: 150.0,
               ),
-              const SizedBox(
+              SizedBox(
                 height: 5,
               ),
               Text(
                 "PathNv",
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24),
               ),
-              const SizedBox(
+              SizedBox(
                 height: 5,
               ),
               Text(
                 "Ric's Dev",
                 style: TextStyle(fontWeight: FontWeight.w300),
               ),
-              const SizedBox(
+              SizedBox(
                 height: 5,
               ),
               YaruBorderContainer(
@@ -641,7 +639,7 @@ class HomeState extends State<Home> with TickerProviderStateMixin {
                 borderRadius: BorderRadius.all(Radius.circular(100)),
                 child: Text('1.0.0'),
               ),
-              const SizedBox(
+              SizedBox(
                 height: 24,
               ),
               YaruTile(
