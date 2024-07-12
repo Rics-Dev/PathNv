@@ -1,10 +1,10 @@
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:pathnv/data/path.dart';
 import 'package:process_run/stdio.dart';
 import 'package:yaru/yaru.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:process_run/process_run.dart';
 
 Future<void> main() async {
   await YaruWindowTitleBar.ensureInitialized();
@@ -42,6 +42,7 @@ class _HomeState extends State<_Home> {
   String searchQuery = '';
   String shell = Platform.environment['SHELL'] ?? 'sh';
   String? newAddedPath = '';
+  TextEditingController pathController = TextEditingController();
 
   void runShellCommand() async {
     String command = 'echo \$PATH';
@@ -113,7 +114,9 @@ class _HomeState extends State<_Home> {
 
     final file = File(shellConfigFile);
     if (!await file.exists()) {
-      print('Config file not found: $shellConfigFile');
+      if (kDebugMode) {
+        print('Config file not found: $shellConfigFile');
+      }
       return;
     }
 
@@ -132,10 +135,46 @@ class _HomeState extends State<_Home> {
     runShellCommand();
   }
 
+  Future<void> editPath(String oldPath, String newPath) async {
+    final home = Platform.environment['HOME'];
+    if (home == null) {
+      throw Exception('HOME environment variable not set');
+    }
+
+    final shellConfigFile = _getShellConfigFile(home);
+
+    final file = File(shellConfigFile);
+    if (!await file.exists()) {
+      if (kDebugMode) {
+        print('Config file not found: $shellConfigFile');
+      }
+      return;
+    }
+
+    final lines = await file.readAsLines();
+
+    final updatedLines = lines.map((line) {
+      if (line.trim().startsWith('export PATH=')) {
+        return line.replaceAll(oldPath, newPath);
+      }
+      return line;
+    }).toList();
+
+    await file.writeAsString(updatedLines.join('\n'));
+
+    runShellCommand();
+  }
+
   @override
   void initState() {
     super.initState();
     runShellCommand();
+  }
+
+  @override
+  void dispose() {
+    pathController.dispose();
+    super.dispose();
   }
 
   @override
@@ -245,7 +284,11 @@ class _HomeState extends State<_Home> {
                           onPressed: () async {
                             String? selectedDirectory =
                                 await FilePicker.platform.getDirectoryPath();
-                            print(selectedDirectory);
+                            if (selectedDirectory != null) {
+                              setState(() {
+                                pathController.text = selectedDirectory;
+                              });
+                            }
                           },
                         )
                       : null,
@@ -255,9 +298,7 @@ class _HomeState extends State<_Home> {
                         YaruIconButton(
                           icon: const Icon(LucideIcons.check),
                           onPressed: () {
-                            setState(() {
-                              path.isEditing = !path.isEditing;
-                            });
+                            editPathDialog(context, path, pathController.text);
                           },
                         ),
                         YaruIconButton(
@@ -276,7 +317,8 @@ class _HomeState extends State<_Home> {
                           icon: const Icon(LucideIcons.pencil),
                           onPressed: () {
                             setState(() {
-                              path.isEditing = !path.isEditing;
+                              path.isEditing = true;
+                              pathController.text = path.path;
                             });
                           },
                         ),
@@ -296,11 +338,17 @@ class _HomeState extends State<_Home> {
                       const EdgeInsets.symmetric(vertical: 16, horizontal: 26),
                   title: path.isEditing
                       ? YaruSearchField(
-                          text: path.path,
+                          controller: pathController,
+                          onChanged: (value) {
+                            setState(() {
+                              // path.newPath = value;
+                              pathController.text = value;
+                            });
+                          },
                         )
                       : SelectableText(path.path),
                 ),
-                Divider(),
+                const Divider(),
               ],
             ],
           )
@@ -384,13 +432,52 @@ class _HomeState extends State<_Home> {
     });
   }
 
+  Future<dynamic> editPathDialog(
+      BuildContext context, Paths path, String newPath) {
+    return showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("Edit Path"),
+          content: Text(
+              "Are you sure you want to change the path from:\n\n${path.path}\n\nto:\n\n$newPath"),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                setState(() {
+                  path.isEditing = false;
+                });
+              },
+              child: const Text("Cancel"),
+            ),
+            TextButton(
+              onPressed: () {
+                if (newPath.isNotEmpty && newPath != path.path) {
+                  editPath(path.path, newPath);
+                  setState(() {
+                    path.isEditing = false;
+                    path.path = newPath;
+                  });
+                }
+                Navigator.pop(context);
+              },
+              child: const Text("Confirm"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<dynamic> deletePathDialog(BuildContext context, Paths path) {
     return showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: const Text("Delete Path"),
-          content: const Text("Are you sure you want to delete this path?"),
+          content: Text(
+              "Are you sure you want to delete this path?\n\n${path.path} "),
           actions: [
             TextButton(
               onPressed: () {
