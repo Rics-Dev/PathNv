@@ -41,6 +41,7 @@ class _HomeState extends State<_Home> {
   bool isSearching = false;
   String searchQuery = '';
   String shell = Platform.environment['SHELL'] ?? 'sh';
+  String? newAddedPath = '';
 
   void runShellCommand() async {
     String command = 'echo \$PATH';
@@ -57,6 +58,22 @@ class _HomeState extends State<_Home> {
     });
   }
 
+  String _getShellConfigFile(String home) {
+    final configFiles = {
+      'bash': '$home/.bashrc',
+      'zsh': '$home/.zshrc',
+      'fish': '$home/.config/fish/config.fish',
+      'csh': '$home/.cshrc',
+      'tcsh': '$home/.cshrc',
+      'ksh': '$home/.kshrc',
+    };
+
+    return configFiles.entries
+        .firstWhere((entry) => shell.contains(entry.key),
+            orElse: () => MapEntry('bash', '$home/.bashrc'))
+        .value;
+  }
+
   void filterPaths(String query) {
     setState(() {
       searchQuery = query;
@@ -69,6 +86,50 @@ class _HomeState extends State<_Home> {
             .toList();
       }
     });
+  }
+
+  Future<void> addNewPath(String newPath) async {
+    final home = Platform.environment['HOME'];
+    if (home == null) {
+      throw Exception('HOME environment variable not set');
+    }
+
+    final shellConfigFile = _getShellConfigFile(home);
+
+    final file = File(shellConfigFile);
+    await file.writeAsString('\nexport PATH="\$PATH:$newPath"\n',
+        mode: FileMode.append);
+
+    runShellCommand();
+  }
+
+  Future<void> deletePath(String pathToDelete) async {
+    final home = Platform.environment['HOME'];
+    if (home == null) {
+      throw Exception('HOME environment variable not set');
+    }
+
+    final shellConfigFile = _getShellConfigFile(home);
+
+    final file = File(shellConfigFile);
+    if (!await file.exists()) {
+      print('Config file not found: $shellConfigFile');
+      return;
+    }
+
+    final lines = await file.readAsLines();
+
+    final updatedLines = lines.where((line) {
+      if (line.trim().startsWith('export PATH=')) {
+        final paths = line.split(':');
+        return !paths.any((path) => path.contains(pathToDelete));
+      }
+      return true;
+    }).toList();
+
+    await file.writeAsString(updatedLines.join('\n'));
+
+    runShellCommand();
   }
 
   @override
@@ -85,53 +146,7 @@ class _HomeState extends State<_Home> {
           child: YaruOptionButton(
             child: const Icon(LucideIcons.plus),
             onPressed: () {
-              showDialog(
-                context: context,
-                builder: (context) => SimpleDialog(
-                  contentPadding:
-                      const EdgeInsets.fromLTRB(0.0, 12.0, 0.0, 16.0),
-                  title: const Text("Add Path"),
-                  children: [
-                    YaruTile(
-                      leading: YaruIconButton(
-                        icon: const Icon(LucideIcons.folder),
-                        onPressed: () async {
-                          String? selectedDirectory =
-                              await FilePicker.platform.getDirectoryPath();
-                          print(selectedDirectory);
-                        },
-                      ),
-                      title: const SizedBox(
-                        width: 500,
-                        child: YaruSearchField(
-                          style: YaruSearchFieldStyle.filledOutlined,
-                          radius: Radius.circular(8),
-                          hintText: "Enter path",
-                          text: "",
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        TextButton(
-                          onPressed: () {
-                            Navigator.pop(context);
-                          },
-                          child: const Text("Cancel"),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.pop(context);
-                          },
-                          child: const Text("Add"),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              );
+              addPathDialog(context);
             },
           ),
         ),
@@ -203,21 +218,25 @@ class _HomeState extends State<_Home> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Icon(LucideIcons.terminal),
-                  const SizedBox(
-                    width: 8,
+                  Row(
+                    children: [
+                      const Icon(LucideIcons.terminal),
+                      const SizedBox(width: 8),
+                      SelectableText(
+                        shell.split('/').last,
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
-                  SelectableText(
-                    "${shell.split('/').last} ${filteredPaths.length} paths",
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  Text("(${filteredPaths.length})")
                 ],
               ),
-              for (Paths path in filteredPaths)
+              for (Paths path in filteredPaths) ...[
                 YaruTile(
                   style: YaruTileStyle.normal,
                   leading: path.isEditing
@@ -281,11 +300,88 @@ class _HomeState extends State<_Home> {
                         )
                       : SelectableText(path.path),
                 ),
+                Divider(),
+              ],
             ],
           )
         ],
       ),
     );
+  }
+
+  Future<dynamic> addPathDialog(BuildContext context) {
+    TextEditingController pathController = TextEditingController();
+
+    return showDialog(
+      context: context,
+      builder: (context) {
+        String newPath = '';
+
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return SimpleDialog(
+              contentPadding: const EdgeInsets.fromLTRB(0.0, 12.0, 0.0, 16.0),
+              title: const Text("Add Path"),
+              children: [
+                YaruTile(
+                  leading: YaruIconButton(
+                    icon: const Icon(LucideIcons.folder),
+                    onPressed: () async {
+                      String? selectedDirectoryPath =
+                          await FilePicker.platform.getDirectoryPath();
+                      if (selectedDirectoryPath != null) {
+                        setState(() {
+                          newPath = selectedDirectoryPath;
+                          pathController.text = newPath;
+                        });
+                      }
+                    },
+                  ),
+                  title: SizedBox(
+                    width: 500,
+                    child: YaruSearchField(
+                      style: YaruSearchFieldStyle.filledOutlined,
+                      radius: const Radius.circular(8),
+                      hintText: "Enter path",
+                      controller: pathController,
+                      onChanged: (value) {
+                        setState(() {
+                          newPath = value;
+                        });
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                      },
+                      child: const Text("Cancel"),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        if (newPath.isNotEmpty) {
+                          addNewPath(newPath);
+                          Navigator.pop(context);
+                        }
+                      },
+                      child: const Text("Add"),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        );
+      },
+    ).then((_) {
+      pathController
+          .dispose(); // Dispose the controller when the dialog is closed
+    });
   }
 
   Future<dynamic> deletePathDialog(BuildContext context, Paths path) {
@@ -298,18 +394,18 @@ class _HomeState extends State<_Home> {
           actions: [
             TextButton(
               onPressed: () {
-                setState(() {
-                  paths.remove(path);
-                });
-                Navigator.pop(context);
-              },
-              child: const Text("Yes"),
-            ),
-            TextButton(
-              onPressed: () {
                 Navigator.pop(context);
               },
               child: const Text("No"),
+            ),
+            TextButton(
+              onPressed: () {
+                if (path.path.isNotEmpty) {
+                  deletePath(path.path);
+                  Navigator.pop(context);
+                }
+              },
+              child: const Text("Yes"),
             ),
           ],
         );
