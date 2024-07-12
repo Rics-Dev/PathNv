@@ -1,125 +1,252 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:pathnv/data/path.dart';
+import 'package:process_run/stdio.dart';
+import 'package:yaru/yaru.dart';
+import 'package:lucide_icons/lucide_icons.dart';
+import 'package:process_run/process_run.dart';
 
-void main() {
+Future<void> main() async {
+  await YaruWindowTitleBar.ensureInitialized();
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
-    );
+    return YaruTheme(builder: (context, yaru, child) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: yaru.theme,
+        darkTheme: yaru.darkTheme,
+        home: const _Home(),
+      );
+    });
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class _Home extends StatefulWidget {
+  const _Home();
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<_Home> createState() => _HomeState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _HomeState extends State<_Home> {
+  List<Paths> paths = [];
+  bool isRefreshing = false;
+  bool isSearching = false;
 
-  void _incrementCounter() {
+  void runShellCommand() async {
+    String shell = Platform.environment['SHELL'] ?? 'sh';
+    String command = 'echo \$PATH';
+
+    ProcessResult result = await Process.run(shell, ['-i', '-c', command]);
+
+    String pathResult = result.stdout.trim();
+
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      paths = pathResult.split(':').map((path) => Paths(path)).toList();
+      isRefreshing = false;
     });
   }
 
   @override
+  void initState() {
+    super.initState();
+    runShellCommand();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+      appBar: YaruWindowTitleBar(
+        leading: Center(
+          child: YaruOptionButton(
+            child: const Icon(LucideIcons.plus),
+            onPressed: () {
+              print("Pressed");
+            },
+          ),
+        ),
+        actions: [
+          YaruSearchButton(
+            icon: isSearching
+                ? const Icon(LucideIcons.x)
+                : const Icon(LucideIcons.search),
+            onPressed: () {
+              setState(() {
+                isSearching = !isSearching;
+              });
+            },
+          ),
+          const SizedBox(width: 8),
+          YaruOptionButton(
+            child: isRefreshing
+                ? const YaruCircularProgressIndicator()
+                : const Icon(LucideIcons.refreshCw),
+            onPressed: () {
+              setState(() {
+                isRefreshing = true;
+              });
+              runShellCommand();
+            },
+          ),
+          const SizedBox(width: 8),
+          YaruPopupMenuButton(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            childPadding: EdgeInsets.zero,
+            icon: const Icon(LucideIcons.menu),
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                child: Text("Preferences"),
+              ),
+              const PopupMenuItem(
+                child: Text("Keyboard Shortcuts"),
+              ),
+              PopupMenuItem(
+                onTap: () => showDialog(
+                  context: context,
+                  builder: (context) => const AlertDialog(
+                    titlePadding: EdgeInsets.zero,
+                    title: YaruDialogTitleBar(
+                      isClosable: true,
+                    ),
+                    content: Text("Heeey"),
+                  ),
+                ),
+                child: const Text("About PathNv"),
+              ),
+            ],
+            child: const Text(""),
+          )
+        ],
+        title: isSearching
+            ? const YaruSearchField(
+                text: "",
+              )
+            : const Text("PathNv"),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
+      body: ListView(
+        padding: const EdgeInsets.all(kYaruPagePadding),
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(LucideIcons.terminal),
+                  SizedBox(
+                    width: 8,
+                  ),
+                  Text(
+                    "Paths",
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              for (Paths path in paths)
+                YaruTile(
+                  style: YaruTileStyle.normal,
+                  leading: path.isEditing
+                      ? YaruIconButton(
+                          icon: const Icon(LucideIcons.folder),
+                          onPressed: () async {
+                            String? selectedDirectory =
+                                await FilePicker.platform.getDirectoryPath();
+                            print(selectedDirectory);
+                          },
+                        )
+                      : null,
+                  trailing: Row(
+                    children: [
+                      if (path.isEditing) ...[
+                        YaruIconButton(
+                          icon: const Icon(LucideIcons.check),
+                          onPressed: () {
+                            setState(() {
+                              path.isEditing = !path.isEditing;
+                            });
+                          },
+                        ),
+                        YaruIconButton(
+                          icon: const Icon(
+                            LucideIcons.x,
+                            color: Colors.red,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              path.isEditing = false;
+                            });
+                          },
+                        ),
+                      ] else ...[
+                        YaruIconButton(
+                          icon: const Icon(LucideIcons.pencil),
+                          onPressed: () {
+                            setState(() {
+                              path.isEditing = !path.isEditing;
+                            });
+                          },
+                        ),
+                        YaruIconButton(
+                          icon: const Icon(
+                            LucideIcons.trash,
+                            color: Colors.red,
+                          ),
+                          onPressed: () {
+                            deletePathDialog(context, path);
+                          },
+                        ),
+                      ],
+                    ],
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 16, horizontal: 26),
+                  title: path.isEditing
+                      ? YaruSearchField(
+                          text: path.path,
+                        )
+                      : SelectableText(path.path),
+                ),
+            ],
+          )
+        ],
+      ),
+    );
+  }
+
+  Future<dynamic> deletePathDialog(BuildContext context, Paths path) {
+    return showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("Delete Path"),
+          content: const Text("Are you sure you want to delete this path?"),
+          actions: [
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  paths.remove(path);
+                });
+                Navigator.pop(context);
+              },
+              child: const Text("Yes"),
             ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text("No"),
             ),
           ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+        );
+      },
     );
   }
 }
