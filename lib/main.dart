@@ -428,7 +428,7 @@ class _HomeState extends State<_Home> {
       },
     ).then((_) {
       pathController
-          .dispose(); // Dispose the controller when the dialog is closed
+          .dispose();
     });
   }
 

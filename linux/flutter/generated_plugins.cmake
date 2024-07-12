@@ -3,11 +3,9 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
-  bitsdojo_window_linux
   gtk
   handy_window
   screen_retriever
-  url_launcher_linux
   window_manager
   yaru_window_linux
 )
