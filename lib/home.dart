@@ -136,6 +136,7 @@ class HomeState extends State<Home> with TickerProviderStateMixin {
     await file.writeAsString('\nexport PATH="\$PATH:$newPath"\n',
         mode: FileMode.append);
 
+    await Process.run(_shell, ['source $shellConfigFile']);
     runShellCommand();
   }
 
@@ -173,6 +174,7 @@ class HomeState extends State<Home> with TickerProviderStateMixin {
           if (kDebugMode) {
             print('Updated PATH in $configFile');
           }
+          await Process.run(_shell, ['source $configFile']);
           runShellCommand();
           return;
         }
@@ -213,6 +215,7 @@ class HomeState extends State<Home> with TickerProviderStateMixin {
           if (kDebugMode) {
             print('Updated PATH in $configFile');
           }
+          await Process.run(_shell, ['source $configFile']);
           runShellCommand();
           return;
         }
