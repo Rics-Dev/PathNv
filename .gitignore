@@ -44,3 +44,4 @@ app.*.map.json
 
 /linux/packaging/*
 makefile
+dist/
